@@ -211,6 +211,25 @@ static void set_write_prot_commit_flush_ptes(struct vm_area_struct *vma,
 	commit_anon_folio_batch(vma, folio, page, addr, ptep, oldpte, ptent, nr_ptes, tlb);
 }
 
+static inline bool mprotect_wants_folio_for_pte(unsigned long cp_flags, pte_t *ptep,
+		pte_t pte, unsigned long max_nr_ptes)
+{
+	/* NUMA hinting needs decide whether working on the folio is ok. */
+	if (cp_flags & MM_CP_PROT_NUMA)
+		return true;
+
+	/* We want the folio for possible write-upgrade. */
+	if (!pte_write(pte) && (cp_flags & MM_CP_TRY_CHANGE_WRITABLE))
+		return true;
+
+	/* There is nothing to batch. */
+	if (max_nr_ptes == 1)
+		return false;
+
+	/* For possibly large folios it's usually a win. */
+	return maybe_contiguous_pte_pfns(ptep, pte);
+}
+
 static long change_pte_range(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, pmd_t *pmd, unsigned long addr,
 		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
@@ -241,16 +260,24 @@ static long change_pte_range(struct mmu_gather *tlb,
 			const fpb_t flags = FPB_RESPECT_SOFT_DIRTY | FPB_RESPECT_WRITE;
 			int max_nr_ptes = (end - addr) >> PAGE_SHIFT;
 			struct folio *folio = NULL;
-			struct page *page;
+			struct page *page = NULL;
 			pte_t ptent;
 
 			/* Already in the desired state. */
 			if (prot_numa && pte_protnone(oldpte))
 				continue;
 
-			page = vm_normal_page(vma, addr, oldpte);
-			if (page)
-				folio = page_folio(page);
+			/*
+			 * Only bother grabbing the folio up-front in a number
+			 * of circumstances, to avoid touching extra cachelines.
+			 */
+			if (mprotect_wants_folio_for_pte(cp_flags, pte, oldpte,
+				max_nr_ptes))
+			{
+				page = vm_normal_page(vma, addr, oldpte);
+				if (page)
+					folio = page_folio(page);
+			}
 
 			/*
 			 * Avoid trapping faults against the zero or KSM
