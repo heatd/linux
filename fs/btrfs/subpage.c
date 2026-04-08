@@ -667,7 +667,7 @@ IMPLEMENT_BTRFS_PAGE_OPS(checked, folio_set_checked, folio_clear_checked,
 	const unsigned int __bpf = btrfs_blocks_per_folio(fs_info, folio); \
 	const struct btrfs_folio_state *__bfs = folio_get_private(folio); \
 									\
-	ASSERT(__bpf <= BITS_PER_LONG);					\
+	ASSERT(__bpf <= BTRFS_MAX_BLOCKS_PER_FOLIO);			\
 	*dst = bitmap_read(__bfs->bitmaps,				\
 			   __bpf * btrfs_bitmap_nr_##name, __bpf);	\
 }

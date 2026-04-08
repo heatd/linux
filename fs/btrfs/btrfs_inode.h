@@ -526,6 +526,8 @@ static inline void btrfs_update_inode_mapping_flags(struct btrfs_inode *inode)
 		mapping_set_stable_writes(inode->vfs_inode.i_mapping);
 }
 
+#define BTRFS_MAX_BLOCKS_PER_FOLIO	BITS_PER_LONG
+
 static inline void btrfs_set_inode_mapping_order(struct btrfs_inode *inode)
 {
 	/* Metadata inode should not reach here. */
