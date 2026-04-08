@@ -129,7 +129,7 @@ struct btrfs_bio_ctrl {
 	 * extent_writepage_io().
 	 * This is to avoid touching ranges covered by compression/inline.
 	 */
-	unsigned long submit_bitmap;
+	unsigned long *submit_bitmap;
 	struct readahead_control *ractl;
 
 	/*
@@ -1455,12 +1455,14 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 	/* Save the dirty bitmap as our submission bitmap will be a subset of it. */
 	if (btrfs_is_subpage(fs_info, folio)) {
 		ASSERT(blocks_per_folio > 1);
-		btrfs_get_subpage_dirty_bitmap(fs_info, folio, &bio_ctrl->submit_bitmap);
+		btrfs_get_subpage_dirty_bitmap(fs_info, folio, bio_ctrl->submit_bitmap);
 	} else {
-		bio_ctrl->submit_bitmap = 1;
+		/* 1 block in this folio */
+		bitmap_zero(bio_ctrl->submit_bitmap, BTRFS_MAX_BLOCKS_PER_FOLIO);
+		bitmap_set(bio_ctrl->submit_bitmap, 0, 1);
 	}
 
-	for_each_set_bitrange(start_bit, end_bit, &bio_ctrl->submit_bitmap,
+	for_each_set_bitrange(start_bit, end_bit, bio_ctrl->submit_bitmap,
 			      blocks_per_folio) {
 		u64 start = page_start + (start_bit << fs_info->sectorsize_bits);
 		u32 len = (end_bit - start_bit) << fs_info->sectorsize_bits;
@@ -1561,7 +1563,7 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 						 fs_info->sectorsize_bits;
 			unsigned int end_bit = (min(page_end + 1, found_start + found_len) -
 						page_start) >> fs_info->sectorsize_bits;
-			bitmap_clear(&bio_ctrl->submit_bitmap, start_bit, end_bit - start_bit);
+			bitmap_clear(bio_ctrl->submit_bitmap, start_bit, end_bit - start_bit);
 		}
 		/*
 		 * Above btrfs_run_delalloc_range() may have unlocked the folio,
@@ -1582,7 +1584,7 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 				fs_info->sectorsize_bits,
 				blocks_per_folio);
 
-		for_each_set_bitrange(start_bit, end_bit, &bio_ctrl->submit_bitmap,
+		for_each_set_bitrange(start_bit, end_bit, bio_ctrl->submit_bitmap,
 				      bitmap_size) {
 			u64 start = page_start + (start_bit << fs_info->sectorsize_bits);
 			u32 len = (end_bit - start_bit) << fs_info->sectorsize_bits;
@@ -1607,7 +1609,7 @@ out:
 	 * If all ranges are submitted asynchronously, we just need to account
 	 * for them here.
 	 */
-	if (bitmap_empty(&bio_ctrl->submit_bitmap, blocks_per_folio)) {
+	if (bitmap_empty(bio_ctrl->submit_bitmap, blocks_per_folio)) {
 		wbc->nr_to_write -= delalloc_to_write;
 		return 1;
 	}
@@ -1727,13 +1729,13 @@ static noinline_for_stack int extent_writepage_io(struct btrfs_inode *inode,
 						  loff_t i_size)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	unsigned long range_bitmap = 0;
 	bool submitted_io = false;
 	int found_error = 0;
 	const u64 end = start + len;
 	const u64 folio_start = folio_pos(folio);
 	const u64 folio_end = folio_start + folio_size(folio);
 	const unsigned int blocks_per_folio = btrfs_blocks_per_folio(fs_info, folio);
+	u64 block_off, block_end;
 	u64 cur;
 	int bit;
 	int ret = 0;
@@ -1756,14 +1758,14 @@ static noinline_for_stack int extent_writepage_io(struct btrfs_inode *inode,
 		return ret;
 	}
 
-	bitmap_set(&range_bitmap, (start - folio_pos(folio)) >> fs_info->sectorsize_bits,
-		   len >> fs_info->sectorsize_bits);
-	bitmap_and(&bio_ctrl->submit_bitmap, &bio_ctrl->submit_bitmap, &range_bitmap,
-		   blocks_per_folio);
+	block_off = (start - folio_pos(folio)) >> fs_info->sectorsize_bits;
+	block_end = block_off + (len >> fs_info->sectorsize_bits);
+	bitmap_clear(bio_ctrl->submit_bitmap, 0, block_off);
+	bitmap_clear(bio_ctrl->submit_bitmap, block_end, BTRFS_MAX_BLOCKS_PER_FOLIO - block_end);
 
 	bio_ctrl->end_io_func = end_bbio_data_write;
 
-	for_each_set_bit(bit, &bio_ctrl->submit_bitmap, blocks_per_folio) {
+	for_each_set_bit(bit, bio_ctrl->submit_bitmap, blocks_per_folio) {
 		cur = folio_pos(folio) + (bit << fs_info->sectorsize_bits);
 
 		if (cur >= i_size) {
@@ -1861,7 +1863,7 @@ static int extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ctrl
 	 * Default to unlock the whole folio.
 	 * The proper bitmap can only be initialized until writepage_delalloc().
 	 */
-	bio_ctrl->submit_bitmap = (unsigned long)-1;
+	bitmap_fill(bio_ctrl->submit_bitmap, BTRFS_MAX_BLOCKS_PER_FOLIO);
 
 	/*
 	 * If the page is dirty but without private set, it's marked dirty
@@ -2633,12 +2635,18 @@ void extent_write_locked_range(struct inode *inode, const struct folio *locked_f
 	struct address_space *mapping = inode->i_mapping;
 	struct btrfs_fs_info *fs_info = inode_to_fs_info(inode);
 	const u32 sectorsize = fs_info->sectorsize;
+	/* XXX this is _LARGE_, 256 bytes in the case of 2MB folios. Not sure if we can
+         * gracefully handle failure to allocate here...  */
+	unsigned long submit_bitmap[BITS_TO_LONGS(BTRFS_MAX_BLOCKS_PER_FOLIO)];
 	loff_t i_size = i_size_read(inode);
 	u64 cur = start;
 	struct btrfs_bio_ctrl bio_ctrl = {
 		.wbc = wbc,
 		.opf = REQ_OP_WRITE | wbc_to_write_flags(wbc),
 	};
+
+	bio_ctrl.submit_bitmap = submit_bitmap;
+	bitmap_zero(submit_bitmap, BTRFS_MAX_BLOCKS_PER_FOLIO);
 
 	if (wbc->no_cgroup_owner)
 		bio_ctrl.opf |= REQ_BTRFS_CGROUP_PUNT;
@@ -2677,7 +2685,7 @@ void extent_write_locked_range(struct inode *inode, const struct folio *locked_f
 		 * Set the submission bitmap to submit all sectors.
 		 * extent_writepage_io() will do the truncation correctly.
 		 */
-		bio_ctrl.submit_bitmap = (unsigned long)-1;
+		bitmap_fill(bio_ctrl.submit_bitmap, BTRFS_MAX_BLOCKS_PER_FOLIO);
 		ret = extent_writepage_io(BTRFS_I(inode), folio, cur, cur_len,
 					  &bio_ctrl, i_size);
 		if (ret == 1)
@@ -2705,6 +2713,11 @@ int btrfs_writepages(struct address_space *mapping, struct writeback_control *wb
 		.opf = REQ_OP_WRITE | wbc_to_write_flags(wbc),
 	};
 
+	bio_ctrl.submit_bitmap = bitmap_zalloc(BTRFS_MAX_BLOCKS_PER_FOLIO,
+						GFP_KERNEL);
+	if (!bio_ctrl.submit_bitmap)
+		return -ENOMEM;
+
 	/*
 	 * Allow only a single thread to do the reloc work in zoned mode to
 	 * protect the write pointer updates.
@@ -2713,6 +2726,7 @@ int btrfs_writepages(struct address_space *mapping, struct writeback_control *wb
 	ret = extent_write_cache_pages(mapping, &bio_ctrl);
 	submit_write_bio(&bio_ctrl, ret);
 	btrfs_zoned_data_reloc_unlock(BTRFS_I(inode));
+	bitmap_free(bio_ctrl.submit_bitmap);
 	return ret;
 }
 

@@ -133,7 +133,7 @@ void btrfs_folio_end_lock(const struct btrfs_fs_info *fs_info,
 void btrfs_folio_set_lock(const struct btrfs_fs_info *fs_info,
 			  struct folio *folio, u64 start, u32 len);
 void btrfs_folio_end_lock_bitmap(const struct btrfs_fs_info *fs_info,
-				 struct folio *folio, unsigned long bitmap);
+				 struct folio *folio, unsigned long *bitmap);
 /*
  * Template for subpage related operations.
  *
