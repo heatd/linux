@@ -17,16 +17,46 @@ static inline unsigned long vma_start_pgoff(struct vm_area_struct *v)
 
 INTERVAL_TREE_DEFINE(struct vm_area_struct, shared.rb,
 		     unsigned long, shared.rb_subtree_last,
-		     vma_start_pgoff, vma_last_pgoff, /* empty */, vma_interval_tree)
+		     vma_start_pgoff, vma_last_pgoff, static, __vma_interval_tree)
 
+void vma_interval_tree_insert(struct vm_area_struct *node,
+			      struct file_rmap *tree)
+{
+	__vma_interval_tree_insert(node, &tree->tree);
+}
+
+void vma_interval_tree_remove(struct vm_area_struct *node,
+			      struct file_rmap *tree)
+{
+	__vma_interval_tree_remove(node, &tree->tree);
+}
+
+struct vm_area_struct *vma_interval_tree_subtree_search(struct vm_area_struct *node,
+				unsigned long start, unsigned long last)
+{
+	return __vma_interval_tree_subtree_search(node, start, last);
+}
+
+struct vm_area_struct *vma_interval_tree_iter_first(struct file_rmap *tree,
+				unsigned long start, unsigned long last)
+{
+	return __vma_interval_tree_iter_first(&tree->tree, start, last);
+}
+
+struct vm_area_struct *vma_interval_tree_iter_next(struct vm_area_struct *node,
+				unsigned long start, unsigned long last)
+{
+	return __vma_interval_tree_iter_next(node, start, last);
+}
 /* Insert node immediately after prev in the interval tree */
 void vma_interval_tree_insert_after(struct vm_area_struct *node,
 				    struct vm_area_struct *prev,
-				    struct rb_root_cached *root)
+				    struct file_rmap *tree)
 {
 	struct rb_node **link;
 	struct vm_area_struct *parent;
 	unsigned long last = vma_last_pgoff(node);
+	struct rb_root_cached *root = &tree->tree;
 
 	VM_BUG_ON_VMA(vma_start_pgoff(node) != vma_start_pgoff(prev), node);
 
@@ -50,7 +80,7 @@ void vma_interval_tree_insert_after(struct vm_area_struct *node,
 	node->shared.rb_subtree_last = last;
 	rb_link_node(&node->shared.rb, &parent->shared.rb, link);
 	rb_insert_augmented(&node->shared.rb, &root->rb_root,
-			    &vma_interval_tree_augment);
+			    &__vma_interval_tree_augment);
 }
 
 static inline unsigned long avc_start_pgoff(struct anon_vma_chain *avc)

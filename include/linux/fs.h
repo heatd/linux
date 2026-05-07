@@ -450,6 +450,10 @@ struct mapping_metadata_bhs {
 	struct list_head list;	/* The list of bhs (b_assoc_buffers) */
 };
 
+struct file_rmap {
+	struct rb_root_cached tree;
+};
+
 /**
  * struct address_space - Contents of a cacheable, mappable object.
  * @host: Owner, either the inode or the block_device.
@@ -480,7 +484,7 @@ struct address_space {
 	/* number of thp, only for non-shmem files */
 	atomic_t		nr_thps;
 #endif
-	struct rb_root_cached	i_mmap;
+	struct file_rmap	i_mmap;
 	unsigned long		nrpages;
 	pgoff_t			writeback_index;
 	const struct address_space_operations *a_ops;
@@ -553,7 +557,7 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
  */
 static inline int mapping_mapped(const struct address_space *mapping)
 {
-	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+	return	!RB_EMPTY_ROOT(&mapping->i_mmap.tree.rb_root);
 }
 
 /*

@@ -400,7 +400,7 @@ static void hugetlb_unmap_file_folio(struct hstate *h,
 					struct address_space *mapping,
 					struct folio *folio, pgoff_t index)
 {
-	struct rb_root_cached *root = &mapping->i_mmap;
+	struct file_rmap *root = &mapping->i_mmap;
 	struct hugetlb_vma_lock *vma_lock;
 	unsigned long pfn = folio_pfn(folio);
 	struct vm_area_struct *vma;
@@ -480,7 +480,7 @@ retry:
 }
 
 static void
-hugetlb_vmdelete_list(struct rb_root_cached *root, pgoff_t start, pgoff_t end,
+hugetlb_vmdelete_list(struct file_rmap *root, pgoff_t start, pgoff_t end,
 		      zap_flags_t zap_flags)
 {
 	struct vm_area_struct *vma;

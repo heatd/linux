@@ -4320,7 +4320,7 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	return wp_page_copy(vmf);
 }
 
-static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
+static inline void unmap_mapping_range_tree(struct file_rmap *root,
 					    pgoff_t first_index,
 					    pgoff_t last_index,
 					    struct zap_details *details)
