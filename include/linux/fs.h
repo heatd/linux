@@ -450,8 +450,11 @@ struct mapping_metadata_bhs {
 	struct list_head list;	/* The list of bhs (b_assoc_buffers) */
 };
 
+#define NR_RMAP_SHARDS 8
+
 struct file_rmap {
-	struct rb_root_cached tree;
+	struct rb_root_cached trees[NR_RMAP_SHARDS];
+	unsigned long nr_vmas;
 };
 
 /**
@@ -557,7 +560,7 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
  */
 static inline int mapping_mapped(const struct address_space *mapping)
 {
-	return	!RB_EMPTY_ROOT(&mapping->i_mmap.tree.rb_root);
+	return READ_ONCE(mapping->i_mmap.nr_vmas) > 0;
 }
 
 /*

@@ -479,10 +479,14 @@ EXPORT_SYMBOL(inc_nlink);
 
 static void __address_space_init_once(struct address_space *mapping)
 {
+	unsigned int i;
+
 	xa_init_flags(&mapping->i_pages, XA_FLAGS_LOCK_IRQ | XA_FLAGS_ACCOUNT);
 	init_rwsem(&mapping->i_mmap_rwsem);
 	spin_lock_init(&mapping->i_private_lock);
-	mapping->i_mmap.tree = RB_ROOT_CACHED;
+
+	for (i = 0; i < NR_RMAP_SHARDS; i++)
+		mapping->i_mmap.trees[i] = RB_ROOT_CACHED;
 }
 
 void address_space_init_once(struct address_space *mapping)

@@ -955,6 +955,7 @@ static inline void vma_init(struct vm_area_struct *vma, struct mm_struct *mm)
 	memset(vma, 0, sizeof(*vma));
 	vma->vm_mm = mm;
 	vma->vm_ops = &vma_dummy_vm_ops;
+	vma->vm_file_rmap_bucket = VM_NO_FILE_RMAP_BUCKET;
 	INIT_LIST_HEAD(&vma->anon_vma_chain);
 	vma_lock_init(vma, false);
 }
@@ -4038,12 +4039,13 @@ struct vm_area_struct *vma_interval_tree_subtree_search(struct vm_area_struct *n
 				unsigned long start, unsigned long last);
 struct vm_area_struct *vma_interval_tree_iter_first(struct file_rmap *tree,
 				unsigned long start, unsigned long last);
-struct vm_area_struct *vma_interval_tree_iter_next(struct vm_area_struct *node,
+struct vm_area_struct *vma_interval_tree_iter_next(struct file_rmap *tree,
+				struct vm_area_struct *node,
 				unsigned long start, unsigned long last);
 
 #define vma_interval_tree_foreach(vma, root, start, last)	    \
 	for (vma = vma_interval_tree_iter_first(root, start, last); \
-	     vma; vma = vma_interval_tree_iter_next(vma, start, last))
+	     vma; vma = vma_interval_tree_iter_next(root, vma, start, last))
 
 void anon_vma_interval_tree_insert(struct anon_vma_chain *node,
 				   struct rb_root_cached *root);

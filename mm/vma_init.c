@@ -49,6 +49,12 @@ static void vm_area_init_from(const struct vm_area_struct *src,
 	dest->vm_pgoff = src->vm_pgoff;
 	dest->vm_file = src->vm_file;
 	dest->vm_private_data = src->vm_private_data;
+	/*
+	 * Forked VMAs must, due to internal file rmap details, maintain
+	 * sequence in the interval tree. Thus, we must keep the bucket
+	 * the same.
+	 */
+	dest->vm_file_rmap_bucket = src->vm_file_rmap_bucket;
 	vm_flags_init(dest, src->vm_flags);
 	memcpy(&dest->vm_page_prot, &src->vm_page_prot,
 	       sizeof(dest->vm_page_prot));

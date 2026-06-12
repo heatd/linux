@@ -976,6 +976,9 @@ struct vm_area_struct {
 	 */
 	unsigned int vm_lock_seq;
 #endif
+	#define VM_NO_FILE_RMAP_BUCKET (-1U)
+	/* On which file rmap bucket are we? */
+	unsigned int vm_file_rmap_bucket;
 	/*
 	 * A file's MAP_PRIVATE vma can be in both i_mmap tree and anon_vma
 	 * list, after a COW of one of the file pages.	A MAP_SHARED vma
