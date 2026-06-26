@@ -3117,6 +3117,77 @@ void rmap_walk_locked(struct folio *folio, struct rmap_walk_control *rwc)
 		rmap_walk_file(folio, rwc, true);
 }
 
+void i_mmap_lock_write_vma(struct address_space *mapping,
+			   struct vm_area_struct *vma)
+{
+	struct file_rmap *rmap = &mapping->i_mmap;
+
+	/*
+	 * We want to capture state transitions from 0 -> 1. For those, we
+	 * need the lock.
+	 */
+	if (atomic_inc_not_zero(&rmap->nr_writers))
+		goto fast_path;
+	mutex_lock(&rmap->writer_lock);
+	if (atomic_inc_return(&rmap->nr_writers) == 1) {
+		/*
+		 * Provide exclusion against readers by holding the
+		 * i_mmap_rwsem in write mode. writers can _concurrently_
+		 * do work, as we only take it once. If any writer that is
+		 * not aware of the bucketed write locking pops up, it will
+		 * trivially block on its own down_write() (or we will).
+		 */
+		down_write(&mapping->i_mmap_rwsem);
+	}
+
+	mutex_unlock(&rmap->writer_lock);
+fast_path:
+	mutex_lock(&rmap->tree_lock[vma->vm_file_rmap_bucket]);
+}
+
+void i_mmap_unlock_write_vma(struct address_space *mapping,
+			     struct vm_area_struct *vma)
+{
+	struct file_rmap *rmap = &mapping->i_mmap;
+
+	mutex_unlock(&rmap->tree_lock[vma->vm_file_rmap_bucket]);
+	if (atomic_dec_and_mutex_lock(&rmap->nr_writers, &rmap->writer_lock)) {
+		up_write(&mapping->i_mmap_rwsem);
+		mutex_unlock(&rmap->writer_lock);
+	}
+}
+
+void i_mmap_lock_write(struct address_space *mapping)
+{
+	down_write(&mapping->i_mmap_rwsem);
+}
+
+int i_mmap_trylock_write(struct address_space *mapping)
+{
+	return down_write_trylock(&mapping->i_mmap_rwsem);
+}
+
+void i_mmap_unlock_write(struct address_space *mapping)
+{
+	up_write(&mapping->i_mmap_rwsem);
+}
+
+int i_mmap_trylock_read(struct address_space *mapping)
+{
+	return down_read_trylock(&mapping->i_mmap_rwsem);
+}
+
+void i_mmap_lock_read(struct address_space *mapping)
+{
+	down_read(&mapping->i_mmap_rwsem);
+}
+
+void i_mmap_unlock_read(struct address_space *mapping)
+{
+	up_read(&mapping->i_mmap_rwsem);
+}
+
+
 #ifdef CONFIG_HUGETLB_PAGE
 /*
  * The following two functions are for anonymous (private mapped) hugepages.

@@ -455,7 +455,23 @@ struct mapping_metadata_bhs {
 struct file_rmap {
 	struct rb_root_cached trees[NR_RMAP_SHARDS];
 	unsigned long nr_vmas;
+	atomic_t nr_writers;
+	struct mutex writer_lock;
+	struct mutex tree_lock[NR_RMAP_SHARDS];
 };
+
+static inline void file_rmap_init(struct file_rmap *rmap)
+{
+	unsigned int i;
+
+	for (i = 0; i < NR_RMAP_SHARDS; i++) {
+		rmap->trees[i] = RB_ROOT_CACHED;
+		mutex_init(&rmap->tree_lock[i]);
+	}
+	rmap->nr_vmas = 0;
+	atomic_set(&rmap->nr_writers, 0);
+	mutex_init(&rmap->writer_lock);
+}
 
 /**
  * struct address_space - Contents of a cacheable, mappable object.
@@ -515,35 +531,16 @@ static inline bool mapping_tagged(const struct address_space *mapping, xa_mark_t
 	return xa_marked(&mapping->i_pages, tag);
 }
 
-static inline void i_mmap_lock_write(struct address_space *mapping)
-{
-	down_write(&mapping->i_mmap_rwsem);
-}
-
-static inline int i_mmap_trylock_write(struct address_space *mapping)
-{
-	return down_write_trylock(&mapping->i_mmap_rwsem);
-}
-
-static inline void i_mmap_unlock_write(struct address_space *mapping)
-{
-	up_write(&mapping->i_mmap_rwsem);
-}
-
-static inline int i_mmap_trylock_read(struct address_space *mapping)
-{
-	return down_read_trylock(&mapping->i_mmap_rwsem);
-}
-
-static inline void i_mmap_lock_read(struct address_space *mapping)
-{
-	down_read(&mapping->i_mmap_rwsem);
-}
-
-static inline void i_mmap_unlock_read(struct address_space *mapping)
-{
-	up_read(&mapping->i_mmap_rwsem);
-}
+void i_mmap_lock_write(struct address_space *mapping);
+int i_mmap_trylock_write(struct address_space *mapping);
+void i_mmap_unlock_write(struct address_space *mapping);
+int i_mmap_trylock_read(struct address_space *mapping);
+void i_mmap_lock_read(struct address_space *mapping);
+void i_mmap_unlock_read(struct address_space *mapping);
+void i_mmap_lock_write_vma(struct address_space *mapping,
+			   struct vm_area_struct *vma);
+void i_mmap_unlock_write_vma(struct address_space *mapping,
+			     struct vm_area_struct *vma);
 
 static inline void i_mmap_assert_locked(struct address_space *mapping)
 {
